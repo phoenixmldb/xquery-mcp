@@ -18,11 +18,17 @@ jobs:
           dotnet-quality: 'preview'
       - run: dotnet build src/ -c Release
       - run: dotnet pack src/ -c Release -o ./nupkg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: ./nupkg/*.nupkg
 
   publish-binaries:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:
@@ -60,19 +66,3 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ./publish/${{ matrix.artifact }}
-
-  publish-nuget:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-          dotnet-quality: 'preview'
-      - run: dotnet pack src/ -c Release -o ./nupkg
-      - name: Push to NuGet
-        run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }}
