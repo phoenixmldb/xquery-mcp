@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>xquery-mcp-server</AssemblyName>
+    <RootNamespace>XQueryMcpServer</RootNamespace>
+    <Description>MCP server providing XQuery spec reference lookup and XQuery/XPath execution</Description>
+    <Version>1.0.0</Version>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>xquery-mcp</ToolCommandName>
+    <PackageId>xquery-mcp</PackageId>
+    <PackageTags>xquery;mcp;model-context-protocol;xml;spec;ai</PackageTags>
+    <RepositoryUrl>https://github.com/phoenixmldb/xquery-mcp</RepositoryUrl>
+    <NoWarn>$(NoWarn);CA1303;CA2007</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="PhoenixmlDb.XQuery" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="../spec/concepts/**/*.md" />
+    <EmbeddedResource Include="../spec/error-codes/**/*.md" />
+    <EmbeddedResource Include="../spec/expressions/**/*.md" />
+    <EmbeddedResource Include="../spec/functions/**/*.md" />
+    <EmbeddedResource Include="../spec/prolog/**/*.md" />
+    <EmbeddedResource Include="../spec/update-facility/**/*.md" />
+  </ItemGroup>
+
+</Project>

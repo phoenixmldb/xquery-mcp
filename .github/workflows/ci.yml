@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+      - run: dotnet build src/ -c Release
+      - run: dotnet pack src/ -c Release -o ./nupkg
+
+  publish-binaries:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - rid: linux-x64
+            artifact: xquery-mcp-linux-x64
+          - rid: linux-arm64
+            artifact: xquery-mcp-linux-arm64
+          - rid: osx-x64
+            artifact: xquery-mcp-osx-x64
+          - rid: osx-arm64
+            artifact: xquery-mcp-osx-arm64
+          - rid: win-x64
+            artifact: xquery-mcp-win-x64.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+      - name: Publish self-contained
+        run: |
+          dotnet publish src/ -c Release -r ${{ matrix.rid }} \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -o ./publish
+      - name: Rename artifact
+        run: |
+          if [[ "${{ matrix.rid }}" == win-* ]]; then
+            mv ./publish/xquery-mcp-server.exe ./publish/${{ matrix.artifact }}
+          else
+            mv ./publish/xquery-mcp-server ./publish/${{ matrix.artifact }}
+          fi
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./publish/${{ matrix.artifact }}
+
+  publish-nuget:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+      - run: dotnet pack src/ -c Release -o ./nupkg
+      - name: Push to NuGet
+        run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }}
