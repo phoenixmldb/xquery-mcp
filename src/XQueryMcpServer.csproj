@@ -11,6 +11,7 @@
     <PackageId>xquery-mcp</PackageId>
     <PackageTags>xquery;mcp;model-context-protocol;xml;spec;ai</PackageTags>
     <RepositoryUrl>https://github.com/phoenixmldb/xquery-mcp</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <NoWarn>$(NoWarn);CA1303;CA2007</NoWarn>
   </PropertyGroup>
 
@@ -18,6 +19,10 @@
     <PackageReference Include="ModelContextProtocol" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="PhoenixmlDb.XQuery" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 
   <ItemGroup>
