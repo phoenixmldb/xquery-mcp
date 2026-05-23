@@ -71,10 +71,21 @@ Add to your MCP client configuration:
 ### Execution
 | Tool | Description |
 |------|-------------|
-| `xquery_evaluate` | Execute an XQuery expression with optional XML input |
+| `xquery_evaluate` | Execute an XQuery expression — returns structured JSON with errors, value, and timing |
 | `xquery_validate` | Compile a query without executing — check for errors |
+| `xquery_compile` | Compile a query to a reusable SHA256 handle |
+| `xquery_run` | Execute a compiled handle against input with optional external variable bindings |
+| `xquery_test` | Assert a query result equals an expected value (red/green TDD) |
 | `xpath_evaluate` | Evaluate an XPath expression against XML |
 | `xquery_explain_error` | Explain an error code with causes and fixes |
+
+### Spec-Aware Analysis
+| Tool | Description |
+|------|-------------|
+| `xquery_compare_versions` | Report which spec version introduced a function or expression |
+| `xquery_find_examples` | Find curated, working XQuery examples by topic |
+| `xquery_suggest_fix` | Given an error code, return a spec-grounded fix suggestion |
+| `server_capabilities` | Report engine version, spec coverage, and supported features |
 
 ### Utilities
 | Tool | Description |

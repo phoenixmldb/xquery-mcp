@@ -5,7 +5,8 @@
     <AssemblyName>xquery-mcp-server</AssemblyName>
     <RootNamespace>XQueryMcpServer</RootNamespace>
     <Description>MCP server providing XQuery spec reference lookup and XQuery/XPath execution</Description>
-    <Version>1.0.0</Version>
+    <Version>1.4.0</Version>
+    <PackageReleaseNotes>Major release — every execution tool now returns structured JSON instead of plain strings, plus new tools for compile-once-run-many, parameter binding, spec-aware analysis, and MCP discoverability. AI agents can now parse failures and self-correct using source-location-aware errors. Highlights: xquery_compile + xquery_run with SHA256 handle cache and external variable binding; xquery_find_examples with 8 curated working examples (FLWOR, try-catch, window-clause, maps/arrays, update facility, fn:transform, module-import); xquery_suggest_fix with top-10 error-code rules; xquery_compare_versions; xquery_test assertion runner; server_capabilities; 4 MCP prompts for guided workflows; browsable spec corpus via xquery://index resources. Runtime exception handling narrowed to engine-specific types — no more silently swallowed OOM/cancellation. Structured error codes XMCP0001 (unknown handle), XMCP0002 (bad JSON args). See RELEASES.md for the full per-phase changelog.</PackageReleaseNotes>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>xquery-mcp</ToolCommandName>
     <PackageId>xquery-mcp</PackageId>
@@ -28,6 +29,9 @@
   <ItemGroup>
     <EmbeddedResource Include="../spec/concepts/**/*.md" />
     <EmbeddedResource Include="../spec/error-codes/**/*.md" />
+    <EmbeddedResource Include="../spec/examples/**/*.md">
+      <LogicalName>examples.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="../spec/expressions/**/*.md" />
     <EmbeddedResource Include="../spec/functions/**/*.md" />
     <EmbeddedResource Include="../spec/prolog/**/*.md" />

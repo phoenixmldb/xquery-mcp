@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text;
+using System.Text.Json;
 using ModelContextProtocol.Server;
 
 namespace XQueryMcpServer;
@@ -183,6 +184,70 @@ public static class LookupTools
         }
 
         return sb.ToString();
+    }
+
+    [McpServerTool(Name = "xquery_compare_versions"), Description(
+        "For a given XPath/XQuery function or expression, report which spec version introduced it " +
+        "and a link to the spec. Useful for disambiguating features added in XQuery 3.1 vs 3.0 vs earlier, " +
+        "and for identifying anything that is an XQuery 4.0 working-draft addition (since: \"4.0\").")]
+    public static string CompareVersions(
+        SpecIndex index,
+        [Description("Function or expression name (e.g., 'fn:tokenize', 'map:merge', 'fn:parse-json')")] string name)
+    {
+        var entry = index.Lookup(name);
+
+        // Also try with fn: prefix for unprefixed names — many XQuery function names
+        // include hyphens (parse-json, deep-equal, string-join), so `-` is not a
+        // namespace indicator. Only the `:` character separates namespace from local name.
+        if (entry == null && !name.Contains(':'))
+            entry = index.Lookup("fn:" + name);
+
+        if (entry == null)
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                name,
+                message = $"No spec entry found for '{name}'. Try xquery_search or xquery_list_functions."
+            }, XQueryErrorMapper.JsonOpts);
+
+        return JsonSerializer.Serialize(new
+        {
+            ok = true,
+            name = entry.Name,
+            since = string.IsNullOrEmpty(entry.Since) ? null : entry.Since,
+            specUrl = string.IsNullOrEmpty(entry.SpecUrl) ? null : entry.SpecUrl,
+            category = string.IsNullOrEmpty(entry.Category) ? null : entry.Category
+        }, XQueryErrorMapper.JsonOpts);
+    }
+
+    [McpServerTool(Name = "xquery_find_examples"), Description(
+        "Find working, curated XQuery examples for a given feature (e.g., 'flwor', 'map', 'fn:transform'). " +
+        "Returns one or more example entries with full XQuery code, prose explanation, and common pitfalls. " +
+        "Use this BEFORE writing XQuery — examples teach idiom in a way spec prose cannot.")]
+    public static string FindExamples(
+        SpecIndex index,
+        [Description("Feature or topic name (e.g., 'flwor', 'window', 'try-catch')")] string topic)
+    {
+        var examples = index.LookupByCategory("example")
+            .Where(e => e.Name.Contains(topic, StringComparison.OrdinalIgnoreCase)
+                     || (e.Content ?? "").Contains(topic, StringComparison.OrdinalIgnoreCase))
+            .Select(e => new
+            {
+                name = e.Name,
+                specUrl = string.IsNullOrEmpty(e.SpecUrl) ? null : e.SpecUrl,
+                since = string.IsNullOrEmpty(e.Since) ? null : e.Since,
+                content = e.Content
+            })
+            .Take(5)
+            .ToArray();
+
+        return JsonSerializer.Serialize(new
+        {
+            ok = true,
+            topic,
+            count = examples.Length,
+            examples
+        }, XQueryErrorMapper.JsonOpts);
     }
 
     private static string FormatEntry(SpecEntry entry)

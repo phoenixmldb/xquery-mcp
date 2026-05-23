@@ -1,8 +1,10 @@
 using System.ComponentModel;
 using System.Text;
+using System.Text.Json;
 using ModelContextProtocol.Server;
 using PhoenixmlDb.XQuery;
 using PhoenixmlDb.XQuery.Execution;
+using XQueryMcpServer.Models;
 
 namespace XQueryMcpServer;
 
@@ -10,48 +12,200 @@ namespace XQueryMcpServer;
 public static class ExecutionTools
 {
     [McpServerTool(Name = "xquery_evaluate"), Description(
-        "Execute an XQuery expression. Optionally provide XML input. Returns the query results.")]
+        "Execute an XQuery expression. Optionally provide XML input and external variable bindings. " +
+        "Returns a JSON result with 'ok', 'value', 'count', 'elapsedMs', or 'errors' with code+location.")]
     public static async Task<string> Evaluate(
         [Description("XQuery expression to execute")] string query,
-        [Description("Optional XML input document")] string? inputXml = null)
+        [Description("Optional XML input document")] string? inputXml = null,
+        [Description(
+            "Optional JSON object mapping external variable local name → value, e.g. {\"name\": \"world\", \"count\": 42}. " +
+            "Strings bind as xs:string, numbers as xs:double, booleans as xs:boolean. " +
+            "Only local names are supported (no namespace prefix). " +
+            "Variables must be declared in the query prolog as 'declare variable $name external;'.")] string? variables = null)
     {
-        try
+        if (!string.IsNullOrEmpty(variables))
         {
-            var facade = new XQueryFacade();
-            var result = await facade.EvaluateAsync(query, inputXml);
-            return string.IsNullOrEmpty(result) ? "(empty sequence)" : result;
+            try { JsonDocument.Parse(variables).Dispose(); }
+            catch (JsonException ex)
+            {
+                var err = new QueryError("XMCP0002",
+                    $"Invalid variables JSON: {ex.Message}", null, null, null, null);
+                return JsonSerializer.Serialize(QueryResult.Failure(new[] { err }), XQueryErrorMapper.JsonOpts);
+            }
         }
-        catch (Exception ex)
-        {
-            return $"Query error: {ex.Message}";
-        }
-    }
 
-    [McpServerTool(Name = "xquery_validate"), Description(
-        "Validate an XQuery expression without executing it. Returns compilation errors with line numbers.")]
-    public static string Validate(
-        [Description("XQuery expression to validate")] string query)
-    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        // Pre-validate via QueryEngine.Compile so we can capture structured errors with locations.
+        // Note: Compile throws XQueryParseException for syntax errors (before returning Success=false).
+        // Semantic/type errors come back as Success=false with AnalysisError entries.
+        QueryCompilationResult? compilationResult = null;
         try
         {
             var engine = new QueryEngine();
-            var result = engine.Compile(query);
-            if (result.Success)
-                return "Valid: query compiled successfully.";
-
-            var sb = new StringBuilder("Errors:\n");
-            foreach (var error in result.Errors)
+            compilationResult = engine.Compile(query);
+            if (!compilationResult.Success)
             {
-                var location = error.Location != null
-                    ? $"Line {error.Location.Line}, Col {error.Location.Column}"
-                    : "Unknown location";
-                sb.AppendLine($"  [{error.Code}] {location}: {error.Message}");
+                var errs = XQueryErrorMapper.AnalysisErrorsToQueryErrors(compilationResult.Errors, query);
+                return JsonSerializer.Serialize(QueryResult.Failure(errs), XQueryErrorMapper.JsonOpts);
             }
-            return sb.ToString();
         }
-        catch (Exception ex)
+        catch (PhoenixmlDb.XQuery.Parser.XQueryParseException parseEx)
         {
-            return $"Validation error: {ex.Message}";
+            var errs = XQueryErrorMapper.ParseErrorsToQueryErrors(parseEx.Errors, query);
+            return JsonSerializer.Serialize(QueryResult.Failure(errs), XQueryErrorMapper.JsonOpts);
+        }
+
+        try
+        {
+            // If variables were provided, drop down to the lower-level API to bind them.
+            if (!string.IsNullOrEmpty(variables))
+            {
+                var store = new XdmDocumentStore();
+                object? doc = null;
+                if (!string.IsNullOrEmpty(inputXml))
+                    doc = store.LoadFromString(inputXml);
+
+                var engine = new QueryEngine(nodeProvider: store, documentResolver: store);
+                using var ctx = engine.CreateContext(
+                    initialContextItem: doc,
+                    staticBaseUri: compilationResult!.BaseUri);
+
+                if (doc != null)
+                    ctx.SetExternalVariable("input", doc);
+
+                XQueryErrorMapper.BindVariables(ctx, variables);
+
+                var sb = new StringBuilder();
+                await foreach (var item in compilationResult.ExecutionPlan!.ExecuteAsync(ctx).ConfigureAwait(false))
+                {
+                    sb.Append(XQueryResultSerializer.Serialize(item, store));
+                }
+                sw.Stop();
+
+                var value = sb.ToString();
+                var isEmpty = string.IsNullOrEmpty(value);
+                return JsonSerializer.Serialize(
+                    QueryResult.Success(
+                        value: isEmpty ? null : value,
+                        count: isEmpty ? 0 : (int?)null,
+                        elapsedMs: sw.ElapsedMilliseconds),
+                    XQueryErrorMapper.JsonOpts);
+            }
+
+            // Fast path: no variables — use the facade.
+            var facade = new XQueryFacade();
+            var result = await facade.EvaluateAsync(query, inputXml);
+            sw.Stop();
+            var resultIsEmpty = string.IsNullOrEmpty(result);
+            return JsonSerializer.Serialize(
+                QueryResult.Success(
+                    value: resultIsEmpty ? null : result,
+                    count: resultIsEmpty ? 0 : (int?)null,
+                    elapsedMs: sw.ElapsedMilliseconds),
+                XQueryErrorMapper.JsonOpts);
+        }
+        catch (XQueryRuntimeException ex)
+        {
+            var err = new QueryError(ex.ErrorCode, ex.Message, null, null, null, null);
+            return JsonSerializer.Serialize(QueryResult.Failure(new[] { err }), XQueryErrorMapper.JsonOpts);
+        }
+        catch (PhoenixmlDb.XQuery.Functions.XQueryException ex)
+        {
+            var err = new QueryError(ex.ErrorCode, ex.Message, null, null, null, null);
+            return JsonSerializer.Serialize(QueryResult.Failure(new[] { err }), XQueryErrorMapper.JsonOpts);
+        }
+    }
+
+    [McpServerTool(Name = "xquery_test"), Description(
+        "Run a query and assert the result equals an expected value. For XML results, compares via XDocument.DeepEquals (canonical, ignores whitespace). For atomic results, compares as strings. " +
+        "Returns { passed, actual?, expected?, diff? }. " +
+        "Use this for red/green TDD on XQuery.")]
+    public static async Task<string> Test(
+        [Description("XQuery expression")] string query,
+        [Description("Optional XML input document")] string? inputXml,
+        [Description("Expected result — XML if it parses as XML, otherwise compared as a string")] string expected,
+        [Description("Optional JSON object of external variables: {\"name\": value}")] string? variables = null)
+    {
+        var evalJson = await Evaluate(query, inputXml, variables);
+        using var doc = JsonDocument.Parse(evalJson);
+        if (!doc.RootElement.GetProperty("ok").GetBoolean())
+            return JsonSerializer.Serialize(new
+            {
+                passed = false,
+                error = evalJson
+            }, XQueryErrorMapper.JsonOpts);
+
+        var actual = doc.RootElement.TryGetProperty("value", out var v) ? v.GetString() ?? "" : "";
+        bool passed;
+        string? diff = null;
+
+        try
+        {
+            var da = System.Xml.Linq.XDocument.Parse("<r>" + actual + "</r>",
+                System.Xml.Linq.LoadOptions.None);
+            var db = System.Xml.Linq.XDocument.Parse("<r>" + expected + "</r>",
+                System.Xml.Linq.LoadOptions.None);
+            passed = System.Xml.Linq.XNode.DeepEquals(da, db);
+        }
+        catch (System.Xml.XmlException)
+        {
+            passed = actual.Trim() == expected.Trim();
+        }
+
+        if (!passed)
+            diff = SimpleDiff(actual, expected);
+
+        return JsonSerializer.Serialize(new
+        {
+            passed,
+            actual,
+            expected,
+            diff
+        }, XQueryErrorMapper.JsonOpts);
+    }
+
+    private static string SimpleDiff(string a, string b)
+    {
+        var la = a.Split('\n');
+        var lb = b.Split('\n');
+        var sb = new StringBuilder();
+        var max = Math.Max(la.Length, lb.Length);
+        for (var i = 0; i < max; i++)
+        {
+            var actualLine = i < la.Length ? la[i] : "";
+            var expectedLine = i < lb.Length ? lb[i] : "";
+            if (actualLine != expectedLine)
+            {
+                sb.AppendLine($"- {expectedLine}");
+                sb.AppendLine($"+ {actualLine}");
+            }
+        }
+        return sb.ToString();
+    }
+
+    [McpServerTool(Name = "xquery_validate"), Description(
+        "Validate an XQuery expression without executing it. Returns a JSON result with 'ok' true on success, or 'errors' with code/line/column/snippet on failure.")]
+    public static string Validate(
+        [Description("XQuery expression to validate")] string query)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var engine = new QueryEngine();
+            var compile = engine.Compile(query);
+            sw.Stop();
+            if (compile.Success)
+                return JsonSerializer.Serialize(
+                    QueryResult.Success(value: null, count: null, elapsedMs: sw.ElapsedMilliseconds),
+                    XQueryErrorMapper.JsonOpts);
+
+            var errs = XQueryErrorMapper.AnalysisErrorsToQueryErrors(compile.Errors, query);
+            return JsonSerializer.Serialize(QueryResult.Failure(errs), XQueryErrorMapper.JsonOpts);
+        }
+        catch (PhoenixmlDb.XQuery.Parser.XQueryParseException parseEx)
+        {
+            var errs = XQueryErrorMapper.ParseErrorsToQueryErrors(parseEx.Errors, query);
+            return JsonSerializer.Serialize(QueryResult.Failure(errs), XQueryErrorMapper.JsonOpts);
         }
     }
 
@@ -100,20 +254,51 @@ public static class ExecutionTools
     }
 
     [McpServerTool(Name = "xpath_evaluate"), Description(
-        "Evaluate an XPath expression against XML input. Returns the result.")]
+        "Evaluate an XPath expression against XML input. Returns a JSON result with 'ok', 'value', 'count', 'elapsedMs', or 'errors' with code+location.")]
     public static async Task<string> EvaluateXPath(
         [Description("XPath expression to evaluate")] string xpath,
         [Description("XML document to evaluate against")] string xml)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        // Pre-validate via QueryEngine.Compile to capture structured errors with locations.
+        try
+        {
+            var engine = new QueryEngine();
+            var compile = engine.Compile(xpath);
+            if (!compile.Success)
+            {
+                var errs = XQueryErrorMapper.AnalysisErrorsToQueryErrors(compile.Errors, xpath);
+                return JsonSerializer.Serialize(QueryResult.Failure(errs), XQueryErrorMapper.JsonOpts);
+            }
+        }
+        catch (PhoenixmlDb.XQuery.Parser.XQueryParseException parseEx)
+        {
+            var errs = XQueryErrorMapper.ParseErrorsToQueryErrors(parseEx.Errors, xpath);
+            return JsonSerializer.Serialize(QueryResult.Failure(errs), XQueryErrorMapper.JsonOpts);
+        }
+
         try
         {
             var facade = new XQueryFacade();
-            var result = await facade.EvaluateAsync(xpath, xml);
-            return string.IsNullOrEmpty(result) ? "(empty sequence)" : result;
+            var value = await facade.EvaluateAsync(xpath, xml);
+            sw.Stop();
+            var isEmpty = string.IsNullOrEmpty(value);
+            return JsonSerializer.Serialize(
+                QueryResult.Success(
+                    value: isEmpty ? null : value,
+                    count: isEmpty ? 0 : (int?)null,
+                    elapsedMs: sw.ElapsedMilliseconds),
+                XQueryErrorMapper.JsonOpts);
         }
-        catch (Exception ex)
+        catch (XQueryRuntimeException ex)
         {
-            return $"XPath error: {ex.Message}";
+            var err = new QueryError(ex.ErrorCode, ex.Message, null, null, null, null);
+            return JsonSerializer.Serialize(QueryResult.Failure(new[] { err }), XQueryErrorMapper.JsonOpts);
+        }
+        catch (PhoenixmlDb.XQuery.Functions.XQueryException ex)
+        {
+            var err = new QueryError(ex.ErrorCode, ex.Message, null, null, null, null);
+            return JsonSerializer.Serialize(QueryResult.Failure(new[] { err }), XQueryErrorMapper.JsonOpts);
         }
     }
 }

@@ -52,7 +52,9 @@ builder.Services.AddSingleton(index);
 builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
-    .WithToolsFromAssembly();
+    .WithToolsFromAssembly()
+    .WithPromptsFromAssembly()
+    .WithResourcesFromAssembly();
 
 var host = builder.Build();
 await host.RunAsync();
