@@ -68,6 +68,12 @@ internal static class XQueryErrorMapper
     /// JSON strings → <c>xs:string</c>, numbers → <c>double</c>, booleans → <c>bool</c>,
     /// null → null, arrays/objects → raw JSON text.
     /// </summary>
+    /// <remarks>
+    /// Values are bound as raw CLR primitives, not wrapped as <c>XdmValue</c>. That is
+    /// forced: the arithmetic operators reach the bound value through
+    /// <c>Convert.ToDouble(object)</c>, which throws <see cref="InvalidCastException"/> on an
+    /// XdmValue. See the note in <c>CompileToolsTests</c> on the resulting serialization defect.
+    /// </remarks>
     /// <param name="ctx">The execution context to bind variables on.</param>
     /// <param name="variablesJson">
     /// Optional JSON object mapping variable local name → value.
