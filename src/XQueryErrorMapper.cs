@@ -92,7 +92,23 @@ internal static class XQueryErrorMapper
             object? value = prop.Value.ValueKind switch
             {
                 JsonValueKind.String => prop.Value.GetString()!,
-                JsonValueKind.Number => prop.Value.GetDouble(),
+                // An integral JSON number binds as xs:integer, not xs:double. JSON draws no
+                // such distinction, but the two are very different downstream: under the
+                // adaptive output method xs:double serializes in exponential form, so
+                // {"x": 41} with $x + 1 returned "4.2e1" — correct per the serialization spec
+                // (QT3 Serialization-adaptive-44 pins xs:double(1e0) as "1.0e0"), and useless
+                // as a tool result. A caller writing 41 means the integer 41.
+                //
+                // fn:parse-json maps every JSON number to xs:double, but that governs parsing
+                // a JSON *document*, not binding external variables, and the ergonomics here
+                // point the other way. Non-integral values still bind as xs:double.
+                // (object) matters: without it the conditional's natural type is double —
+                // long widens to double implicitly, double does not narrow to long — so the
+                // integral branch would be converted straight back to the double it exists to
+                // avoid, silently.
+                JsonValueKind.Number => prop.Value.TryGetInt64(out var i64)
+                    ? (object)i64
+                    : prop.Value.GetDouble(),
                 JsonValueKind.True or JsonValueKind.False => prop.Value.GetBoolean(),
                 JsonValueKind.Null => null,
                 _ => prop.Value.GetRawText()  // arrays/objects passed as JSON text

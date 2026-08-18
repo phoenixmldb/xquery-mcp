@@ -4,12 +4,12 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- MCP -->
-    <PackageVersion Include="ModelContextProtocol" Version="1.1.0" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0-preview.1.25080.5" />
+    <PackageVersion Include="ModelContextProtocol" Version="2.2.0" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
     <!-- Engine -->
     <PackageVersion Include="PhoenixmlDb.XQuery" Version="1.6.2" />
     <!-- Test -->
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>

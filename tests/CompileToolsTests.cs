@@ -33,6 +33,43 @@ public class CompileToolsTests
         Assert.Equal("42", rd.RootElement.GetProperty("value").GetString());
     }
 
+    /// <summary>
+    /// An integral JSON number binds as xs:integer, so ordinary arithmetic reads the way a
+    /// caller expects. Bound as xs:double — which is what this did before, and what
+    /// fn:parse-json does for JSON documents — the same expression yields "4.2e1": correct
+    /// under the adaptive output method, and unusable as a tool result.
+    /// </summary>
+    [Fact]
+    public async Task IntegralVariable_BindsAsInteger_NotDouble()
+    {
+        var compileJson = CompileTools.Compile("declare variable $x external; $x + 1");
+        using var cd = JsonDocument.Parse(compileJson);
+        var handle = cd.RootElement.GetProperty("handle").GetString()!;
+
+        var runJson = await CompileTools.Run(handle, inputXml: null, variables: """{"x": 41}""");
+        using var rd = JsonDocument.Parse(runJson);
+        Assert.Equal("42", rd.RootElement.GetProperty("value").GetString());
+    }
+
+    /// <summary>
+    /// The other half of the same decision: a non-integral JSON number is still xs:double, and
+    /// the exponential rendering that follows is the serialization spec working, not a defect.
+    /// QT3 Serialization-adaptive-44 pins xs:double(1e0) as "1.0e0"; this test exists so the
+    /// exponential form is not "fixed" the next time it looks surprising.
+    /// </summary>
+    [Fact]
+    public async Task NonIntegralVariable_StaysDouble_AndSerializesInExponentialForm()
+    {
+        var compileJson = CompileTools.Compile("declare variable $x external; $x + 0.5");
+        using var cd = JsonDocument.Parse(compileJson);
+        var handle = cd.RootElement.GetProperty("handle").GetString()!;
+
+        var runJson = await CompileTools.Run(handle, inputXml: null, variables: """{"x": 41.5}""");
+        using var rd = JsonDocument.Parse(runJson);
+        var value = rd.RootElement.GetProperty("value").GetString();
+        Assert.Contains("e", value, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Run_UnknownHandle_ReturnsError()
     {
