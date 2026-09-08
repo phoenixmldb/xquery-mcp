@@ -1,15 +1,21 @@
-# Keeps the PhoenixmlDb engine pin current.
+# Keeps the PhoenixmlDb engine pins current.
 #
-# This repo was 26 releases behind before anyone noticed — the MCP server was answering
-# questions with an engine from a different generation while the engine it names shipped fix
-# after fix. scripts/check-pins.sh now fails the build when that happens; this opens the bump
-# as a PR so it does not have to fail first.
+# `directories` (plural) and an explicit list, NOT `directory: "/"`. The root has no solution
+# file, so NuGet discovery from "/" found nothing: the job ran daily, reported
+# "No project files found", and finished GREEN. A scheduled check that succeeds while doing
+# nothing is worse than no check — it is the same fail-open shape this estate has been clearing
+# out of its conformance harness all week, and it went unnoticed for exactly one day because the
+# run was green.
+#
+# Verify a change here by reading the run log for a non-empty "Projects" list, not by seeing the
+# job succeed.
 #
 # Scoped to PhoenixmlDb.* so the one update that matters is not buried in third-party churn.
 version: 2
 updates:
   - package-ecosystem: nuget
-    directory: "/"
+    directories:
+      - "/src"
     schedule:
       interval: daily
     allow:
