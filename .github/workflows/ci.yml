@@ -42,6 +42,9 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Version: ${VERSION} (tag: ${LATEST_TAG}, +${COMMITS_SINCE} commits)"
 
+      - name: Engine pins are not stale
+        run: ./scripts/check-pins.sh
+
       - name: Build
         env:
           BUILD_VERSION: ${{ steps.version.outputs.version }}
