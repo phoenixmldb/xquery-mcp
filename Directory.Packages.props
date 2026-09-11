@@ -6,7 +6,11 @@
     <!-- MCP -->
     <PackageVersion Include="ModelContextProtocol" Version="2.2.0" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
-    <!-- Engine -->
+    <!-- Engine. check-pins: train-locked — must equal the release version at pack time.
+         This server EMBEDS the engine: installing xquery-mcp 1.8.0 runs whatever version this
+         names. It sat at 1.6.14 through the whole 1.7.0 train and nothing said so, because
+         check-pins.sh only catches a pin behind what is PUBLISHED, not one behind the train
+         being released. scripts/check-release-train.sh is what catches that. -->
     <PackageVersion Include="PhoenixmlDb.XQuery" Version="1.6.14" />
     <!-- Test -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />

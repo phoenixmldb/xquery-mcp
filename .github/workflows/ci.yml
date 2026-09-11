@@ -45,6 +45,14 @@ jobs:
       - name: Engine pins are not stale
         run: ./scripts/check-pins.sh
 
+      # Equality check, not a staleness check. check-pins.sh above catches a pin that has
+      # fallen behind what is PUBLISHED; this catches one that has fallen behind the train
+      # being released. This repo sat pinned at 1.6.14 through the entire 1.7.0 train with
+      # nothing to say so. Fails closed: no train-locked pins is an error, not a pass.
+      - name: Engine pin matches this release train
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: ./scripts/check-release-train.sh "${{ steps.version.outputs.version }}"
+
       - name: Build
         env:
           BUILD_VERSION: ${{ steps.version.outputs.version }}
@@ -53,8 +61,12 @@ jobs:
       - name: Test
         run: dotnet test tests/ -c Release
 
+      # Tag-only, as in the engine repos. This previously packed and PUBLISHED on every push
+      # to main, which is where the 4-part versions (1.4.0.3 = tag + 3 commits) came from: the
+      # published history is a merge count, not a release history. A lockstep train cannot hold
+      # if one member republishes itself two commits later.
       - name: Pack
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           PKG_VERSION: ${{ steps.version.outputs.version }}
         run: dotnet pack src/ -c Release --no-build -p:PackageVersion="$PKG_VERSION" -o ./artifacts
@@ -68,7 +80,7 @@ jobs:
 
   publish-nuget:
     needs: build
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
