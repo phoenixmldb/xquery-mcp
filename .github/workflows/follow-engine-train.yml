@@ -1,0 +1,77 @@
+# Releases this MCP server in tandem with every engine train, so it always embeds the current
+# engine. Lucas's rule (2026-10-01): the MCP servers ship with each engine release.
+#
+# When the train's last step (the xquery4 CLI) is on nuget.org and the engine pin is behind it:
+# bump the pin, build, test, check the release train, commit to main, tag v<train>, and dispatch
+# ci.yml on that tag. ci.yml then publishes the NuGet tool and the release binaries exactly as
+# for a hand-made tag. Nothing is pushed unless the build and tests pass on the new engine.
+name: Follow engine train
+
+on:
+  schedule:
+    - cron: '41 * * * *'   # hourly; seconds when nothing has changed
+  workflow_dispatch:
+
+permissions:
+  contents: write   # commit the pin, push the tag
+  actions: write    # dispatch ci.yml: a tag pushed with GITHUB_TOKEN triggers no workflow
+
+concurrency:
+  group: follow-engine-train
+  cancel-in-progress: false
+
+jobs:
+  follow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Move the pin to the latest completed train
+        id: sync
+        shell: bash -eo pipefail {0}   # a failed script must fail the step, not hide behind tee
+        run: ./scripts/follow-engine-train.sh PhoenixmlDb.XQuery | tee /tmp/follow.log; grep -E '^(version|changed)=' /tmp/follow.log >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-dotnet@v4
+        if: steps.sync.outputs.changed == 'true'
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build, test and check the train on the new engine
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          V: ${{ steps.sync.outputs.version }}
+        run: |
+          dotnet build src/ -c Release
+          dotnet test tests/ -c Release
+          ./scripts/check-release-train.sh "$V"
+
+      - name: Commit and tag
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          V: ${{ steps.sync.outputs.version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "build: PhoenixmlDb.XQuery -> $V, released with engine train $V
+
+          Automated by follow-engine-train.yml: the engine train $V finished (xquery4 $V is on
+          nuget.org), and this server builds and passes its tests on it."
+          git push origin HEAD:main
+          git tag -a "v$V" -m "xquery-mcp $V, engine train $V"
+          git push origin "v$V"
+
+      - name: Publish (dispatch ci.yml on the tag)
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.sync.outputs.version }}
+        run: |
+          gh workflow run ci.yml --ref "v$V"
+          # Assert a run exists rather than trusting the dispatch call (the docs repo's sync
+          # pushed pins for a day while its deploy dispatch failed with HTTP 403).
+          sleep 20
+          n=$(gh run list --workflow=ci.yml --branch "v$V" --limit 5 --json event --jq 'length')
+          [ "${n:-0}" -gt 0 ] || { echo "::error::ci.yml was dispatched on v$V but no run appeared; nothing will publish."; exit 1; }
+          echo "ci.yml is running on v$V."
