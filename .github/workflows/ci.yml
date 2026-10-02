@@ -6,6 +6,9 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  # follow-engine-train.yml dispatches this on the tag it pushes: a tag pushed with GITHUB_TOKEN
+  # triggers no workflow on its own.
+  workflow_dispatch:
 
 permissions:
   contents: read
