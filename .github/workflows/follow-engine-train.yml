@@ -71,7 +71,13 @@ jobs:
           gh workflow run ci.yml --ref "v$V"
           # Assert a run exists rather than trusting the dispatch call (the docs repo's sync
           # pushed pins for a day while its deploy dispatch failed with HTTP 403).
-          sleep 20
-          n=$(gh run list --workflow=ci.yml --branch "v$V" --limit 5 --json event --jq 'length')
-          [ "${n:-0}" -gt 0 ] || { echo "::error::ci.yml was dispatched on v$V but no run appeared; nothing will publish."; exit 1; }
+          # A dispatched run can take well over 20 s to be listed (2026-10-07: xslt-mcp v2.7.0
+          # reported "no run appeared" and then published normally). Poll for up to 3 minutes.
+          n=0
+          for i in $(seq 1 12); do
+            sleep 15
+            n=$(gh run list --workflow=ci.yml --branch "v$V" --limit 5 --json event --jq 'length')
+            [ "${n:-0}" -gt 0 ] && break
+          done
+          [ "${n:-0}" -gt 0 ] || { echo "::error::ci.yml was dispatched on v$V but no run appeared within 3 minutes; nothing will publish."; exit 1; }
           echo "ci.yml is running on v$V."
