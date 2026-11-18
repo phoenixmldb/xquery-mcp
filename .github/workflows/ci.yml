@@ -59,10 +59,13 @@ jobs:
       - name: Build
         env:
           BUILD_VERSION: ${{ steps.version.outputs.version }}
-        run: dotnet build src/ -c Release -p:Version="$BUILD_VERSION"
+        # Build the tests too, with the same version. A test step that builds again without
+        # -p:Version writes the csproj version over the server dll, and pack --no-build then
+        # ships that dll: the 3.1.0 packages reported serverInfo.version 1.4.0.0 / 1.5.0.0.
+        run: dotnet build tests/ -c Release -p:Version="$BUILD_VERSION"
 
       - name: Test
-        run: dotnet test tests/ -c Release
+        run: dotnet test tests/ -c Release --no-build
 
       # Tag-only, as in the engine repos. This previously packed and PUBLISHED on every push
       # to main, which is where the 4-part versions (1.4.0.3 = tag + 3 commits) came from: the
@@ -73,6 +76,12 @@ jobs:
         env:
           PKG_VERSION: ${{ steps.version.outputs.version }}
         run: dotnet pack src/ -c Release --no-build -p:PackageVersion="$PKG_VERSION" -o ./artifacts
+
+      - name: Packed server reports the release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          PKG_VERSION: ${{ steps.version.outputs.version }}
+        run: ./scripts/check-packed-version.sh artifacts "$PKG_VERSION"
 
       - name: Upload NuGet artifact
         if: startsWith(github.ref, 'refs/tags/v')
