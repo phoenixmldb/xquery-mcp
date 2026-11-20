@@ -36,7 +36,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         if: steps.sync.outputs.changed == 'true'
         with:
-          dotnet-version: '10.0.x'
+          # SDK 11 builds (global.json); the 10 runtime runs the net10.0 tests.
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Build, test and check the train on the new engine
         if: steps.sync.outputs.changed == 'true'

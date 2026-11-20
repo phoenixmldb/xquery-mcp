@@ -28,8 +28,11 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
-          dotnet-quality: 'preview'
+          # SDK 11 builds (global.json); the 8 and 10 runtimes run the older targets' tests.
+          dotnet-version: |
+            8.0.x
+            10.0.x
+            11.0.x
 
       - name: Determine version from git tags
         id: version
@@ -67,6 +70,14 @@ jobs:
       - name: Test
         run: dotnet test tests/ -c Release --no-build
 
+      # publish-binaries runs only on a tag, so its command is exercised here first: a project
+      # with two target frameworks cannot be published without -f (NETSDK1129).
+      - name: Self-contained publish works (linux-x64)
+        run: |
+          dotnet publish src/ -c Release -f net10.0 -r linux-x64 --self-contained true \
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish-check
+          test -x ./publish-check/xquery-mcp-server
+
       # Tag-only, as in the engine repos. This previously packed and PUBLISHED on every push
       # to main, which is where the 4-part versions (1.4.0.3 = tag + 3 commits) came from: the
       # published history is a merge count, not a release history. A lockstep train cannot hold
@@ -90,8 +101,40 @@ jobs:
           name: nuget-packages
           path: ./artifacts/*.nupkg
 
+  # The same build and tests on SDK 10. global.json pins SDK 11; this job repoints it, so the
+  # projects build net10.0 alone (Directory.Build.props adds net11.0 only on SDK 11). It proves
+  # those builds need nothing from SDK 11, and that a host still on SDK 10 can build.
+  build-sdk10:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Select SDK 10
+        run: |
+          python3 - <<'PY'
+          import json
+          g = json.load(open("global.json"))
+          g["sdk"] = {"version": "10.0.100", "rollForward": "latestFeature"}
+          json.dump(g, open("global.json", "w"), indent=2)
+          PY
+          dotnet --version
+          case "$(dotnet --version)" in 10.*) ;; *) echo "::error::expected SDK 10"; exit 1 ;; esac
+
+      - name: Build
+        run: |
+          dotnet build tests/ -c Release
+
+      - name: Test
+        run: |
+          dotnet test tests/ -c Release --no-build
+
   publish-nuget:
-    needs: build
+    needs: [build, build-sdk10]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -106,8 +149,11 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
-          dotnet-quality: 'preview'
+          # SDK 11 builds (global.json); the 8 and 10 runtimes run the older targets' tests.
+          dotnet-version: |
+            8.0.x
+            10.0.x
+            11.0.x
 
       - name: Login to NuGet via trusted publisher
         id: nuget-login
@@ -128,7 +174,7 @@ jobs:
 
   publish-binaries:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, build-sdk10]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -152,8 +198,11 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
-          dotnet-quality: 'preview'
+          # SDK 11 builds (global.json); the 8 and 10 runtimes run the older targets' tests.
+          dotnet-version: |
+            8.0.x
+            10.0.x
+            11.0.x
 
       - name: Determine version
         id: version
@@ -166,7 +215,9 @@ jobs:
         env:
           BUILD_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          dotnet publish src/ -c Release -r ${{ matrix.rid }} \
+          # A self-contained binary carries its own runtime, so one target is enough: net10.0,
+          # the LTS release. The tool package ships both net10.0 and net11.0.
+          dotnet publish src/ -c Release -f net10.0 -r ${{ matrix.rid }} \
             --self-contained true \
             -p:PublishSingleFile=true \
             -p:IncludeNativeLibrariesForSelfExtract=true \
